@@ -1,0 +1,36 @@
+# --- Python --------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# --- Editor / IDE / OS ---------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Claude Code project-local settings ---------------------------------
+.claude/
+
+# --- Sweep logs (regenerable, sometimes large/noisy) --------------------
+*.log
+
+# --- Convergence/sweep cache pickles (regenerable from scripts) ---------
+convergence_histories.pkl
+pid_convergence_histories.pkl
+synthetic_convergence_histories.pkl
+
+# --- Experiment output folder (regenerable from scripts) ----------------
+experiments/
+
+# --- Very large interactive HTML output (~57 MB; regenerable) -----------
+simulator_3d.html

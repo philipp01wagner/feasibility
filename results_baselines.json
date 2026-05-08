@@ -1,0 +1,6 @@
+{
+  "target_only_logreg": 0.7288135593220338,
+  "pooled_erm_logreg": 0.7288135593220338,
+  "pretrain_finetune_mlp": 0.8305084745762712,
+  "pooled_erm_mlp": 0.7966101694915254
+}

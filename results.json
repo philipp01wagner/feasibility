@@ -1,0 +1,11 @@
+{
+  "target_only_logreg": 0.7288135593220338,
+  "pooled_erm_logreg": 0.7288135593220338,
+  "pretrain_finetune_mlp": 0.8305084745762712,
+  "pooled_erm_mlp": 0.7966101694915254,
+  "strategy_a_logreg": 0.7288135593220338,
+  "strategy_a_mlp": 0.8135593220338984,
+  "jcpot_logreg": 0.7288135593220338,
+  "jcpot_mlp": 0.847457627118644,
+  "deep_jdot": 0.847457627118644
+}

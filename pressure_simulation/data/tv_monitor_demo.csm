@@ -1,0 +1,167 @@
+// ============================================================================
+// PUMP CONFIGURATION
+// ============================================================================
+Mode_Pump: 0
+Quant_Pump: 9.0
+Temperature_Pump: 293.15
+// MolWeight_Pump: 28.0  // determined by Rho_Pump and SLM
+Rho_Pump: 1.25
+
+// ============================================================================
+// CHAMBER CONFIGURATION
+// ============================================================================
+Volume_Chamb: 17.0
+Temperature_Chamb: 293.15
+Initial_Pressure_Chamb: 10.0
+MolWeight_Chamb: 28.0
+// Rho_Chamb: 1.25
+Chamber_pressure_max: 30 // unit: Torr
+Chamber_pressure_min: 1 // unit: Torr 
+
+// ============================================================================
+// VALVE CONFIGURATION
+// ============================================================================
+Initial_Position_Valve: 0.0
+Speed_Valve: 1000.0  // represents 12 Torr/Second
+Resolution_Valve: 0.02
+
+// ============================================================================
+// SIMULATION CONFIGURATION
+// ============================================================================
+Sample_Rate: 1e-3
+Time_Step: 5e-4  // Dr. Yang: use 1.0e-6s as the calculation step size to ensure the stability of the flow parameter Q.
+Max_Steps: 500000
+
+// ============================================================================
+// OPTIMIZATION (PID-BO) SETTINGS
+// ============================================================================
+Early_Stopping_Patience: 10 // Stop optimization if no improvement for x iterations
+Acquisition_Function: lcb // Options: lognei, lcb
+Acquisition_Beta: 0.1 // Only used if Acquisition_Function is lcb
+
+Grid_Step_Size: 5
+Grid_Task_Duration_Seconds: 2.5
+
+// ============================================================================
+// OPTIMIZATION MODE CONFIGURATION
+// ============================================================================
+// Optimization_Mode: "direct" or "ctm"
+//   - "direct": Optimizes PID gains (kp, ki, kd) directly using BO
+//   - "ctm": Uses CTM to optimize tuning factors (f_p, f_i, f_d),
+//            then converts to PID gains using system characteristics
+// Both modes support the same BO methods: vanilla, rgpe, malibo
+// Can be overridden via CLI: python scripts/minimal_pidbo_usage.py --ctm
+Optimization_Mode: direct
+
+// CTM (Custom Tuning Method) Configuration - used when Optimization_Mode=ctm
+// Tuning factor bounds for f_p, f_i, f_d
+// The appropriate bounds are selected automatically based on CTM_Use_Derivative
+
+// PI-Controller bounds (used when CTM_Use_Derivative: false)
+CTM_PI_F_P_Bounds: [0.4, 1.2]   // Proportional factor bounds for PI
+CTM_PI_F_I_Bounds: [0.4, 4.0]   // Integral factor bounds for PI
+CTM_PI_F_D_Bounds: [0.0, 0.0]   // Derivative disabled for PI
+
+// PID-Controller bounds (used when CTM_Use_Derivative: true)
+CTM_PID_F_P_Bounds: [0.2, 1.2]  // Proportional factor bounds for PID
+CTM_PID_F_I_Bounds: [0.5, 4.0]  // Integral factor bounds for PID
+CTM_PID_F_D_Bounds: [0.05, 1.0] // Derivative factor bounds for PID
+
+CTM_Use_Derivative: true       // true for PID, false for PI
+CTM_Opening_Percentage: 0.25    // Valve opening for step response in system ID 
+
+// ============================================================================
+// PID CONTROLLER SETTINGS
+// ============================================================================
+PID_Ensemble: false
+PID_Use_Antiwindup: true
+PID_Clamping_Antiwindup: true
+PID_Kaw: 0.0
+PID_Tau_Factor: 0.0 // tau_factor = 0: no filtering (pure derivative on diff/dt, highest noise amplification). tau_factor = 1 ~ 3: light filtering.
+PID_Gain_Bounds: [
+	[0.0, 0.0, 0.0],
+	[0.2, 1.5, 1e-8]
+]
+
+// ============================================================================
+// WARM-UP PHASE SETTINGS
+// ============================================================================
+Using_Warmup: false
+Warmup_Target_Pressure: 5.0
+Warmup_Duration_Seconds: 1.0
+Warmup_Iterations: 3
+Warm_Start_Expansion: 0.5
+Warmup_PID_Gain_Bounds: [
+	[0.0, 0.0, 0.0],
+	[3.0, 1.0, 0.2]
+]
+
+// ============================================================================
+// REFERENCE CURVE FOR TEST
+// ============================================================================
+Reference_Curve_Schedule: [
+	[5.0, 20.0],
+	[5.0, 15.0],
+	[5.0, 30.0],
+	[5.0, 10.0],
+	[5.0, 5.0],
+	[5.0, 10.0]
+]
+
+Reference_Jitter_Enable: false
+Reference_Jitter_Duration_Jitter: 0.15
+Reference_Jitter_Pressure_Jitter: 2.0
+Reference_Jitter_Min_Step_Delta: 0.5
+
+// ============================================================================
+// OBJECTIVE FUNCTION & METRICS
+// ============================================================================
+Allowed_rise_time: 2 // Maximum rise time 2 seconds; adding soft-constraints: Penalty_Offset + Penalty_Coefficient * (rise_time - 2s)
+Rise_Time_Penalty_Coefficient: 10.0
+Rise_Time_Penalty_Offset: 100.0
+
+// Important metrics according to Xingqi:
+// Settling Time (step_t_s_2), overshoot, final_error, (optional) itae.
+// 
+Objective_Weights: {
+	"final_error": 0.0, // absolute deviation between final pressure and final target
+	"overshoot": 0.0, // peak pressure above the target reached during simulation
+	"itae": 0.0, // integral of absolute error with linear time weighting
+	"settling_time": 3.0, // settling time to 2% error band 
+	"rise_time":1.0, // rise time to 2% error band
+	"relative_final_error": 30.0, // final error normalized by step height
+	"relative_overshoot": 8.0, //  overshoot normalized by step height
+	"relative_itae": 15.0, // ITAE normalized by step height 
+	"relative_settling_time": 0.0, // settling time normalized by step height
+	"relative_rise_time": 0.0 // rise time normalized by step height
+}
+
+// ============================================================================
+// TRANSFER LEARNING SETTINGS
+// ============================================================================
+// MolWeight values for source tasks (used in transfer learning experiments)
+// Different MolWeights simulate different gas types:
+//   - 2.0: H2 (Hydrogen)
+//   - 4.0: He (Helium)
+//   - 28.0: N2 (Nitrogen) - default
+//   - 32.0: O2 (Oxygen)
+//   - 40.0: Ar (Argon)
+//   - 44.0: CO2 (Carbon Dioxide)
+//   - 131.0: Xe (Xenon)
+
+// MALIBO classifier configuration
+MALIBO_Classifier_Config: {
+	"num_hidden_units": 64,
+	"num_layers": 3,
+	"num_features": 16
+}
+
+// MALIBO training configuration  
+MALIBO_Train_Config: {
+	"num_epochs": 500,
+	"batch_size": 32
+}
+
+// RGPE configuration
+RGPE_MC_Samples: 256
+RGPE_MC_Samples_Ranking: 128
