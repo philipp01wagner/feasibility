@@ -1,13 +1,13 @@
 """Synthetic transfer-learning constrained-BO benchmark.
 
 A family of related 2-D minimisation tasks with a binary feasibility label.
-Each task is a shifted Branin objective with a perturbed-ellipsoid feasibility
+Each task is a shifted Ackley objective (concentric ripple bowl with a single
+global minimum at the origin) paired with a perturbed-ellipsoid feasibility
 region. Task parameters are sampled from a meta-distribution so the resulting
 tasks are similar but not identical -- the canonical TL setting.
 
 Default oracle returns ``(y, c)`` for a task index ``t`` and an input
-``x in [-5, 10] x [0, 15]`` (Branin's standard domain). All evaluations are
-deterministic and closed-form.
+``x in [-5, 5] x [-5, 5]``. All evaluations are deterministic and closed-form.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import numpy as np
 class TaskParams:
     """Per-task parameter bundle.
 
-    mu       -- shift of the objective (translates Branin minima)
+    mu       -- shift of the objective (translates the Ackley minimum)
     nu       -- centre of the feasibility ellipsoid
     a, b     -- semi-axes of the feasibility ellipsoid
     gamma    -- amplitude of the sinusoidal feasibility perturbation
@@ -39,7 +39,7 @@ class SyntheticTLBenchmark:
 
     The objective on task t is
 
-        f_t(x) = Branin(x - mu_t)
+        f_t(x) = Ackley(x - mu_t)
 
     and the feasibility indicator is
 
@@ -72,20 +72,20 @@ class SyntheticTLBenchmark:
         RNG seed for task generation. Reproducible.
     """
 
-    # Branin's standard domain.
-    DOMAIN_LO = np.array([-5.0, 0.0])
-    DOMAIN_HI = np.array([10.0, 15.0])
+    # Ackley domain: [-5, 5]^2 (~10 ripple periods across each axis).
+    DOMAIN_LO = np.array([-5.0, -5.0])
+    DOMAIN_HI = np.array([5.0, 5.0])
     DIM = 2
 
     def __init__(
         self,
         n_tasks: int = 10,
-        sigma_mu: float = 1.5,
-        sigma_nu: float = 1.0,
-        a_range: tuple[float, float] = (3.0, 5.5),
-        b_range: tuple[float, float] = (3.0, 5.5),
+        sigma_mu: float = 1.0,
+        sigma_nu: float = 0.7,
+        a_range: tuple[float, float] = (2.0, 3.5),
+        b_range: tuple[float, float] = (2.0, 3.5),
         gamma_range: tuple[float, float] = (0.1, 0.4),
-        period: float = 4.0,
+        period: float = 2.5,
         seed: int = 42,
     ):
         rng = np.random.default_rng(seed)
@@ -107,25 +107,22 @@ class SyntheticTLBenchmark:
 
     # ----- core math -------------------------------------------------------
     @staticmethod
-    def _branin(x: np.ndarray) -> np.ndarray:
-        """Standard 2-D Branin function. x shape (..., 2)."""
-        a, b = 1.0, 5.1 / (4.0 * np.pi ** 2)
-        c, r = 5.0 / np.pi, 6.0
-        s, t = 10.0, 1.0 / (8.0 * np.pi)
-        x1 = x[..., 0]
-        x2 = x[..., 1]
-        return (
-            a * (x2 - b * x1 ** 2 + c * x1 - r) ** 2
-            + s * (1.0 - t) * np.cos(x1)
-            + s
-        )
+    def _ackley(x: np.ndarray) -> np.ndarray:
+        """Standard 2-D Ackley function. x shape (..., 2). Global min at origin, f=0."""
+        a, b, c = 20.0, 0.2, 2.0 * np.pi
+        d = float(x.shape[-1])  # dimensionality
+        sum_sq = np.sum(x ** 2, axis=-1)
+        sum_cos = np.sum(np.cos(c * x), axis=-1)
+        term1 = -a * np.exp(-b * np.sqrt(sum_sq / d))
+        term2 = -np.exp(sum_cos / d)
+        return term1 + term2 + a + np.e
 
     def evaluate(self, task_idx: int, x: np.ndarray) -> np.ndarray:
         """Objective value f_t(x). x can be (2,) or (N, 2)."""
         x = np.atleast_2d(np.asarray(x, dtype=float))
         p = self.tasks[task_idx]
         shifted = x - p.mu[None, :]
-        out = self._branin(shifted)
+        out = self._ackley(shifted)
         return out if x.shape[0] > 1 else float(out[0])
 
     def feasibility_score(self, task_idx: int, x: np.ndarray) -> np.ndarray:
@@ -207,15 +204,13 @@ class SyntheticTLBenchmark:
         return float(y[best]), pts[best].copy()
 
     def true_unconstrained_minimum(self, task_idx: int) -> tuple[float, np.ndarray]:
-        """Branin's three minima all at f=0.397887. Return one shifted."""
-        # one of Branin's analytic minima, shifted by mu_t
-        x_star_unshifted = np.array([np.pi, 2.275])
-        return 0.39788735772973816, x_star_unshifted + self.tasks[task_idx].mu
+        """Ackley has a single global minimum at the origin, f=0. Shift by mu_t."""
+        return 0.0, self.tasks[task_idx].mu.copy()
 
     # ----- visualisation --------------------------------------------------
     def plot_task(self, task_idx: int, ax=None, n_grid: int = 200,
                   show_feasibility: bool = True, show_optima: bool = True,
-                  log_objective: bool = True):
+                  log_objective: bool = False):
         """Contour plot of objective + feasibility region for one task."""
         import matplotlib.pyplot as plt
         if ax is None:

@@ -2,7 +2,7 @@
 
 Mirrors ``tl_bayopt.py`` and ``pressure_simulation/tl_pid_bayopt.py`` but
 operates on ``synthetic_benchmark.SyntheticTLBenchmark`` (closed-form
-shifted-Branin + perturbed-ellipsoid feasibility). Results land in a
+shifted-Ackley + perturbed-ellipsoid feasibility). Results land in a
 timestamped experiment folder with aggregate + per-target convergence
 plots and CSVs.
 
@@ -48,13 +48,13 @@ N_INIT = 5
 N_ITER = 25
 N_RUNS = 3
 N_CANDIDATES = 1500
-INFEASIBLE_PENALTY = 1000.0   # > max Branin over domain (~310)
+INFEASIBLE_PENALTY = 50.0     # > max Ackley over [-5, 5]^2 (~13)
 SEED = 42
 
 # Meta-distribution spread: smaller -> more similar tasks ->
-# stronger positive-transfer regime. Defaults of the benchmark
-# (sigma_mu=1.5, sigma_nu=1.0) produced negative transfer; tightening
-# both makes the source priors useful again.
+# stronger positive-transfer regime. Benchmark defaults (sigma_mu=1.0,
+# sigma_nu=0.7 on [-5,5]^2) produce moderate spread; tightening below
+# keeps source priors useful while still distinguishing target from sources.
 SIGMA_MU = 0.5
 SIGMA_NU = 0.4
 
@@ -64,16 +64,10 @@ SCHEMES = {
     3: "cBO target-clf",
     4: "cBO RGPE-vote",
     5: "cBO equal-vote",
-    6: "cBO RGPE-vote x target",
-    7: "cBO equal-vote x target",
-    8: "cBO RGPE-vote + penalty",
-    9: "cBO equal-vote + penalty",
 }
 COLORS = [
     "#2E86AB", "#E63946", "#06A77D",
     "#FFB400", "#7B2CBF",            # static-source vote (4, 5)
-    "#FF6B00", "#FF1493",            # x target hybrid (6, 7)
-    "#A8C619", "#9F86C0",            # + penalty hybrid (8, 9)
 ]
 HIST_PICKLE = "synthetic_convergence_histories.pkl"
 
@@ -247,24 +241,26 @@ def bo_loop(scheme, seed, bench, target_idx, source_gps, source_clfs,
         history.append(best_feas())
         infeas_history.append(int((~c).sum()))
 
-    return np.array(history), np.array(infeas_history)
+    return np.array(history), np.array(infeas_history), X, c
 
 
 # ---------------------------- per-target driver ---------------------------
 def run_for_target(target_idx, bench, source_data):
     """Run all 5 schemes x N_RUNS for target_idx; return per-scheme histories."""
-    out = {s: {"hist": [], "infeas": []} for s in SCHEMES}
+    out = {s: {"hist": [], "infeas": [], "X": [], "c": []} for s in SCHEMES}
     for run in range(N_RUNS):
         seed = SEED + 100 + run
         # Source models depend on the seed only via SVC's random_state;
         # we fit them once per seed for paired comparison across schemes.
         source_gps, source_clfs = fit_source_models(bench, source_data, seed)
         for s in SCHEMES:
-            hist, infeas = bo_loop(
+            hist, infeas, X_all, c_all = bo_loop(
                 s, seed, bench, target_idx, source_gps, source_clfs
             )
             out[s]["hist"].append(hist)
             out[s]["infeas"].append(infeas)
+            out[s]["X"].append(X_all)
+            out[s]["c"].append(c_all)
     return out
 
 
@@ -395,6 +391,16 @@ def main():
         out = (exp_dir / "per_target" / f"target_{ti:02d}.png")
         plot_per_target(ti, bench, sweep[ti], f_star, out)
     print(f"  Wrote {N_TASKS} per-target plots.")
+
+    # --- per-method query overlays ---------------------------------------
+    queries_dir = exp_dir / "queries"
+    queries_dir.mkdir(exist_ok=True)
+    print(f"Writing per-method query overlays into {queries_dir}/...")
+    for s, name in SCHEMES.items():
+        out = queries_dir / f"scheme_{s}_{name.replace(' ', '_')}.png"
+        plot_method_queries(s, name, bench, sweep, out)
+    print(f"  Wrote {len(SCHEMES)} per-method query overlays.")
+
     print(f"\nAll outputs in: {exp_dir}")
 
 
@@ -447,6 +453,55 @@ def plot_per_target(ti, bench, runs_by_scheme, f_star, out_path):
     )
     fig.tight_layout()
     fig.savefig(out_path, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_method_queries(scheme, scheme_name, bench, sweep, out_path):
+    """For one method: a 2x5 grid showing every target's task landscape with
+    that method's queried points scattered over all runs. Feasible points are
+    drawn as green dots, infeasible points as red crosses."""
+    fig, axes = plt.subplots(2, 5, figsize=(22, 9))
+    fig.suptitle(
+        f"Method: {scheme_name}  — query points across {N_RUNS} runs\n"
+        f"green dot = feasible eval, red x = infeasible eval, "
+        f"white star = constrained min",
+        fontsize=12,
+    )
+    for ti, ax in enumerate(axes.ravel()):
+        bench.plot_task(ti, ax=ax, n_grid=120, log_objective=False,
+                        show_optima=False)
+
+        # Stack queries from every run, distinguish initial Sobol vs BO picks
+        all_X = np.vstack(sweep[ti][scheme]["X"])
+        all_c = np.concatenate(sweep[ti][scheme]["c"]).astype(bool)
+        feas = all_c
+        infeas = ~all_c
+
+        ax.scatter(
+            all_X[feas, 0], all_X[feas, 1],
+            s=22, c="#1aff66", edgecolors="#0d6b2a", linewidths=0.6,
+            zorder=5, label=f"feasible ({int(feas.sum())})",
+        )
+        ax.scatter(
+            all_X[infeas, 0], all_X[infeas, 1],
+            s=42, c="red", marker="x", linewidths=1.4,
+            zorder=6, label=f"infeasible ({int(infeas.sum())})",
+        )
+
+        # Mark the constrained optimum on top so it's visible.
+        f_star_xy = bench.true_constrained_minimum(ti, n_grid=251)
+        if f_star_xy is not None:
+            _, x_star = f_star_xy
+            ax.plot(x_star[0], x_star[1], marker="*", markersize=16,
+                    markerfacecolor="white", markeredgecolor="black",
+                    zorder=7)
+
+        ax.set_title(f"task {ti}", fontsize=10)
+        ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+        ax.set_xlabel(""); ax.set_ylabel("")
+
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -531,8 +586,8 @@ def plot_aggregate(bench, sweep, truths, out_path):
                         xytext=(7, 7), fontsize=10)
     ax_lay.set_xlim(bench.DOMAIN_LO[0], bench.DOMAIN_HI[0])
     ax_lay.set_ylim(bench.DOMAIN_LO[1], bench.DOMAIN_HI[1])
-    ax_lay.set_xlabel("x1 (Branin shift mu_1)")
-    ax_lay.set_ylabel("x2 (Branin shift mu_2)")
+    ax_lay.set_xlabel("x1 (Ackley shift mu_1)")
+    ax_lay.set_ylabel("x2 (Ackley shift mu_2)")
     ax_lay.set_title("Task shifts mu_t in input space")
     ax_lay.grid(alpha=0.3)
 

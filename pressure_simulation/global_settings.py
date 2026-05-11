@@ -9,14 +9,8 @@ from typing import Any, Dict, Iterator
 GainBounds = tuple[tuple[float, float, float], tuple[float, float, float]]
 
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SETTINGS_PATH = (
-    ROOT
-    / "transfer_of_feasibility"
-    / "pressure_simulation"
-    / "data"
-    / "tv_monitor_demo.csm"
-)
+ROOT = Path(__file__).resolve().parent
+DEFAULT_SETTINGS_PATH = ROOT / "data" / "tv_monitor_demo.csm"
 
 
 @dataclass(frozen=True)

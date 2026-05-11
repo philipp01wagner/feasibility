@@ -33,10 +33,10 @@ magnitude. A purely mathematical benchmark removes these:
 
 ## 2. Domain and notation
 
-We work in two dimensions on the standard Branin domain
+We work in two dimensions on the symmetric Ackley domain
 
 $$
-\mathcal{X} \;=\; [-5, 10] \times [0, 15] \;\subset\; \mathbb{R}^2.
+\mathcal{X} \;=\; [-5, 5] \times [-5, 5] \;\subset\; \mathbb{R}^2.
 $$
 
 A point is $\mathbf{x} = (x_1, x_2)\in\mathcal{X}$. We define $T \ge 2$
@@ -60,29 +60,23 @@ benchmark.
 
 ### 3.1 Objective
 
-The per-task objective is the **shifted Branin function**
+The per-task objective is the **shifted Ackley function**
 
 $$
-f_t(\mathbf{x}) \;=\; \mathrm{Branin}\!\big(\mathbf{x} - \boldsymbol{\mu}_t\big),
+f_t(\mathbf{x}) \;=\; \mathrm{Ackley}\!\big(\mathbf{x} - \boldsymbol{\mu}_t\big),
 $$
 
-where the standard Branin function is
+where the standard 2-D Ackley function is
 
 $$
-\mathrm{Branin}(\mathbf{u}) \;=\; a\,\big(u_2 - b\,u_1^2 + c\,u_1 - r\big)^2 \;+\; s\,(1-t)\,\cos(u_1) \;+\; s
+\mathrm{Ackley}(\mathbf{u}) \;=\; -a\,\exp\!\left(-b\,\sqrt{\tfrac{1}{2}(u_1^2 + u_2^2)}\right) \;-\; \exp\!\left(\tfrac{1}{2}\big(\cos(c u_1) + \cos(c u_2)\big)\right) \;+\; a \;+\; e
 $$
 
-with constants $a = 1$, $b = 5.1/(4\pi^2)$, $c = 5/\pi$, $r = 6$,
-$s = 10$, $t = 1/(8\pi)$. Branin has three global minima all at
-$f^\star = 0.397\,887\ldots$, located at
-
-$$
-\mathbf{u}^{(1)} = (-\pi,\; 12.275),\quad \mathbf{u}^{(2)} = (\pi,\; 2.275),\quad \mathbf{u}^{(3)} = (9.42478,\; 2.475).
-$$
-
-Shifting by $\boldsymbol{\mu}_t$ translates all three minima together
-without changing the objective values: $f_t(\boldsymbol{\mu}_t +
-\mathbf{u}^{(i)}) = f^\star$ for $i \in \{1,2,3\}$.
+with constants $a = 20$, $b = 0.2$, $c = 2\pi$. Ackley has a **single**
+global minimum at the origin with $f^\star = 0$, surrounded by a dense
+lattice of shallow local minima from the cosine term. Shifting by
+$\boldsymbol{\mu}_t$ translates the global minimum so that
+$f_t(\boldsymbol{\mu}_t) = 0$.
 
 ### 3.2 Feasibility
 
@@ -92,7 +86,7 @@ $$
 h_t(\mathbf{x}) \;=\; 1 \;-\; \left(\frac{x_1 - \nu_{t,1}}{a_t}\right)^2 \;-\; \left(\frac{x_2 - \nu_{t,2}}{b_t}\right)^2 \;+\; \gamma_t\,\sin\!\left(\frac{2\pi (x_1 + x_2)}{T_p}\right),
 $$
 
-with $T_p$ a fixed spatial period (default $T_p = 4$). The binary
+with $T_p$ a fixed spatial period (default $T_p = 2.5$). The binary
 feasibility label is
 
 $$
@@ -122,7 +116,7 @@ $$
 a_t \sim \mathcal{U}(a_{\min}, a_{\max}),\quad b_t \sim \mathcal{U}(b_{\min}, b_{\max}),\quad \gamma_t \sim \mathcal{U}(\gamma_{\min}, \gamma_{\max}),
 $$
 
-where $\bar{\mathbf{x}} = (2.5, 7.5)$ is the centre of the domain. The
+where $\bar{\mathbf{x}} = (0, 0)$ is the centre of the domain. The
 **conditional** distribution of $\boldsymbol{\nu}_t$ given
 $\boldsymbol{\mu}_t$ is the key TL design decision: it makes
 feasibility centres co-vary with objective optima, so source tasks
@@ -139,7 +133,8 @@ The two scalar knobs that drive the **transfer-difficulty axis** are
 For source tasks to be useful, $\sigma_\mu, \sigma_\nu$ should be
 **small enough that the optima cluster** but **large enough that the
 target's optimum is not exactly at any source's**. The defaults
-$\sigma_\mu = 1.5$, $\sigma_\nu = 1.0$ achieve this.
+$\sigma_\mu = 1.0$, $\sigma_\nu = 0.7$ achieve this on the $[-5, 5]^2$
+domain (~10 %/7 % of the domain width).
 
 ---
 
@@ -148,13 +143,13 @@ $\sigma_\mu = 1.5$, $\sigma_\nu = 1.0$ achieve this.
 | symbol | default | comment |
 |---|---|---|
 | $T$ | $10$ | number of tasks |
-| $\bar{\mathbf{x}}$ | $(2.5, 7.5)$ | domain centre |
-| $\sigma_\mu$ | $1.5$ | objective-shift std-dev |
-| $\sigma_\nu$ | $1.0$ | feasibility-centre conditional std-dev |
-| $a_{\min}, a_{\max}$ | $3.0,\; 5.5$ | ellipsoid semi-axis range (x1) |
-| $b_{\min}, b_{\max}$ | $3.0,\; 5.5$ | ellipsoid semi-axis range (x2) |
+| $\bar{\mathbf{x}}$ | $(0, 0)$ | domain centre |
+| $\sigma_\mu$ | $1.0$ | objective-shift std-dev |
+| $\sigma_\nu$ | $0.7$ | feasibility-centre conditional std-dev |
+| $a_{\min}, a_{\max}$ | $2.0,\; 3.5$ | ellipsoid semi-axis range (x1) |
+| $b_{\min}, b_{\max}$ | $2.0,\; 3.5$ | ellipsoid semi-axis range (x2) |
 | $\gamma_{\min}, \gamma_{\max}$ | $0.1,\; 0.4$ | boundary-ripple amplitude range |
-| $T_p$ | $4.0$ | ripple spatial period |
+| $T_p$ | $2.5$ | ripple spatial period |
 | seed | $42$ | RNG seed (deterministic across runs) |
 
 These defaults yield a feasibility coverage of roughly 30–50 % of the
@@ -199,13 +194,13 @@ notebook.
 
 ### 6.1 Known optima
 
-Because the objective is a shifted Branin, the **unconstrained**
-minimum value is the constant $f^\star_{\rm un} = 0.397\,887\ldots$ and
-the location is $\boldsymbol{\mu}_t + \mathbf{u}^{(i)}$ for the chosen
-$i\in\{1,2,3\}$. The **constrained** minimum is found by gridding the
-domain and taking the lowest objective value over feasible cells; the
-helper `true_constrained_minimum(task_idx, n_grid)` does this with a
-$401 \times 401$ grid by default (gives $\sim 0.04$ unit resolution).
+Because the objective is a shifted Ackley, the **unconstrained**
+minimum value is the constant $f^\star_{\rm un} = 0$ and its location
+is exactly $\boldsymbol{\mu}_t$. The **constrained** minimum is found
+by gridding the domain and taking the lowest objective value over
+feasible cells; the helper `true_constrained_minimum(task_idx, n_grid)`
+does this with a $401 \times 401$ grid by default (gives $\sim 0.025$
+unit resolution on $[-5, 5]^2$).
 
 ### 6.2 Feasibility coverage
 
@@ -215,8 +210,8 @@ $$
 \rho_t \;=\; \frac{|\{\mathbf{x}\in\mathcal{X} : h_t(\mathbf{x}) \ge 0\}|}{|\mathcal{X}|}.
 $$
 
-With the default ellipsoid axes $a_t, b_t \sim \mathcal{U}(3, 5.5)$ on
-the $15\times 15$ box, $\rho_t$ ranges over roughly $[0.20, 0.60]$.
+With the default ellipsoid axes $a_t, b_t \sim \mathcal{U}(2, 3.5)$ on
+the $10\times 10$ box, $\rho_t$ ranges over roughly $[0.20, 0.60]$.
 Sources of feasibility-rate variation match the laser-cutting setting
 where $\rho$ varies from $\sim 12\%$ to $\sim 26\%$ across tasks (see
 `constrained_bo_transfer.md`, §8).
@@ -287,11 +282,13 @@ sweep on the laser-cutting data (see
 
 ## 8. Limitations and extensions
 
-The 2-D Branin family is deliberately small. Three extensions are
+The 2-D Ackley family is deliberately small. Three extensions are
 straightforward in the same code:
 
-1. **Higher dimension.** Replace `_branin` with a Hartmann-3 or
-   Hartmann-6 function and shift it by a $d$-vector $\boldsymbol{\mu}_t$.
+1. **Higher dimension.** `_ackley` reads $d$ from `x.shape[-1]` and so
+   generalises directly; widen `DOMAIN_LO/HI` to the desired $d$-vectors.
+   For a different landscape, swap in a Hartmann-3 / Hartmann-6 function
+   and shift it by a $d$-vector $\boldsymbol{\mu}_t$.
    The feasibility score generalises to $h_t(\mathbf{x}) = 1 -
    \sum_{i=1}^d ((x_i - \nu_{t,i})/a_{t,i})^2 + \gamma_t\,\sin(\cdot)$.
 
