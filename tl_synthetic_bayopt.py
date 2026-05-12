@@ -43,10 +43,11 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 # ---------------------------- config --------------------------------------
 N_TASKS = 10
-N_PER_SOURCE = 50
-N_INIT = 5
-N_ITER = 25
-N_RUNS = 3
+import os
+N_PER_SOURCE = int(os.environ.get("N_PER_SOURCE", 50))
+N_INIT = int(os.environ.get("N_INIT", 5))
+N_ITER = int(os.environ.get("N_ITER", 25))
+N_RUNS = int(os.environ.get("N_RUNS", 20))
 N_CANDIDATES = 1500
 INFEASIBLE_PENALTY = 50.0     # > max Ackley over [-5, 5]^2 (~13)
 SEED = 42
@@ -55,8 +56,8 @@ SEED = 42
 # stronger positive-transfer regime. Benchmark defaults (sigma_mu=1.0,
 # sigma_nu=0.7 on [-5,5]^2) produce moderate spread; tightening below
 # keeps source priors useful while still distinguishing target from sources.
-SIGMA_MU = 0.5
-SIGMA_NU = 0.4
+SIGMA_MU = float(os.environ.get("SIGMA_MU", 0.5))
+SIGMA_NU = float(os.environ.get("SIGMA_NU", 0.4))
 
 SCHEMES = {
     1: "Vanilla BO",
@@ -380,6 +381,11 @@ def main():
     for i, s in enumerate(SCHEMES):
         print(f"  {SCHEMES[s]:<22} {obj_wins[i]:>9.2f} {inf_wins[i]:>13.2f}")
 
+    # --- statistical analysis --------------------------------------------
+    print("\n=== Statistical analysis (paired across targets x seeds) ===")
+    stat_report = statistical_analysis(sweep, truths, exp_dir)
+    print(stat_report)
+
     # --- aggregate plot ---------------------------------------------------
     plot_aggregate(bench, sweep, truths, exp_dir / "convergence_aggregate.png")
     print(f"Saved {exp_dir / 'convergence_aggregate.png'}")
@@ -402,6 +408,157 @@ def main():
     print(f"  Wrote {len(SCHEMES)} per-method query overlays.")
 
     print(f"\nAll outputs in: {exp_dir}")
+
+
+def _bootstrap_mean_ci(values, n_boot=10000, alpha=0.05, rng_seed=0):
+    """Percentile-bootstrap (1-alpha) CI on the mean of `values`."""
+    values = np.asarray(values, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return float("nan"), float("nan"), float("nan")
+    rng_b = np.random.default_rng(rng_seed)
+    idx = rng_b.integers(0, values.size, size=(n_boot, values.size))
+    means = values[idx].mean(axis=1)
+    lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return float(values.mean()), float(lo), float(hi)
+
+
+def statistical_analysis(sweep, truths, exp_dir):
+    """Pooled and per-target stats on final regret and infeasibility.
+
+    Reports:
+    - Mean regret + 95 % bootstrap CI per scheme.
+    - Pairwise paired Wilcoxon (Holm-Bonferroni corrected).
+    - Per-target win-rate over seeds (more robust to magnitude scaling).
+    """
+    from scipy.stats import wilcoxon
+
+    n_schemes = len(SCHEMES)
+    scheme_keys = list(SCHEMES.keys())
+    scheme_names = [SCHEMES[s] for s in scheme_keys]
+
+    # Build full (target, seed) x scheme matrices for final regret and infeas
+    final_regret = np.zeros((N_TASKS, N_RUNS, n_schemes), dtype=float)
+    final_infeas = np.zeros((N_TASKS, N_RUNS, n_schemes), dtype=float)
+    for ti in range(N_TASKS):
+        for si, s in enumerate(scheme_keys):
+            H = np.array(sweep[ti][s]["hist"])
+            H = np.where(np.isfinite(H), H, INFEASIBLE_PENALTY)
+            I = np.array(sweep[ti][s]["infeas"])
+            final_regret[ti, :, si] = H[:, -1] - truths[ti]
+            final_infeas[ti, :, si] = I[:, -1]
+
+    pooled_regret = final_regret.reshape(-1, n_schemes)   # (N_TASKS*N_RUNS, S)
+    pooled_infeas = final_infeas.reshape(-1, n_schemes)
+    n_paired = pooled_regret.shape[0]
+
+    # --- 1) Mean regret + 95 % bootstrap CI per scheme ------------------
+    lines = []
+    lines.append("\n-- Mean final regret across all targets x seeds "
+                 f"(N={n_paired} paired observations) --")
+    lines.append(f"  {'scheme':<22} {'mean regret':>11}  "
+                 f"{'95% bootstrap CI':>22}  {'mean miscuts':>13}  "
+                 f"{'95% CI':>16}")
+    regret_summary = []
+    infeas_summary = []
+    for si, name in enumerate(scheme_names):
+        m_r, lo_r, hi_r = _bootstrap_mean_ci(pooled_regret[:, si])
+        m_i, lo_i, hi_i = _bootstrap_mean_ci(pooled_infeas[:, si])
+        regret_summary.append((name, m_r, lo_r, hi_r))
+        infeas_summary.append((name, m_i, lo_i, hi_i))
+        lines.append(f"  {name:<22} {m_r:>11.3f}  "
+                     f"[{lo_r:>8.3f}, {hi_r:>8.3f}]  "
+                     f"{m_i:>13.2f}  [{lo_i:>5.2f},{hi_i:>5.2f}]")
+
+    # --- 2) Pairwise paired Wilcoxon on pooled regret --------------------
+    lines.append("\n-- Pairwise paired Wilcoxon signed-rank tests on regret "
+                 "(Holm-Bonferroni corrected p-values) --")
+    pairs = []
+    raw_p = []
+    diffs = []
+    for i in range(n_schemes):
+        for j in range(i + 1, n_schemes):
+            d = pooled_regret[:, i] - pooled_regret[:, j]
+            d = d[np.isfinite(d)]
+            if d.size < 5 or np.all(d == 0):
+                p = 1.0
+            else:
+                try:
+                    _, p = wilcoxon(d)
+                except ValueError:
+                    p = 1.0
+            pairs.append((i, j))
+            raw_p.append(p)
+            diffs.append(d)
+
+    # Holm-Bonferroni correction
+    raw_p = np.array(raw_p)
+    order = np.argsort(raw_p)
+    n_tests = len(raw_p)
+    adjusted_p = np.empty_like(raw_p)
+    max_so_far = 0.0
+    for rank, idx in enumerate(order):
+        adj = min(1.0, raw_p[idx] * (n_tests - rank))
+        max_so_far = max(max_so_far, adj)
+        adjusted_p[idx] = max_so_far
+
+    lines.append(f"  {'scheme A':<22} {'scheme B':<22} "
+                 f"{'mean A-B':>10} {'median A-B':>11} {'p (Holm)':>10} {'sig':>4}")
+    pair_rows = []
+    for (i, j), p_adj, d in zip(pairs, adjusted_p, diffs):
+        mean_d = float(d.mean()) if d.size else float("nan")
+        med_d = float(np.median(d)) if d.size else float("nan")
+        sig = (
+            "***" if p_adj < 0.001 else
+            "**" if p_adj < 0.01 else
+            "*" if p_adj < 0.05 else
+            "ns"
+        )
+        lines.append(f"  {scheme_names[i]:<22} {scheme_names[j]:<22} "
+                     f"{mean_d:>10.3f} {med_d:>11.3f} {p_adj:>10.2e} {sig:>4}")
+        pair_rows.append({
+            "scheme_A": scheme_names[i],
+            "scheme_B": scheme_names[j],
+            "mean_diff": mean_d,
+            "median_diff": med_d,
+            "p_raw": raw_p[pairs.index((i, j))],
+            "p_holm": p_adj,
+            "sig": sig,
+        })
+
+    # --- 3) Per-target win rates over seeds ------------------------------
+    lines.append("\n-- Per-target win rates over seeds "
+                 "(fraction of seeds where scheme is strictly best on regret) --")
+    win_table = np.zeros((N_TASKS, n_schemes))
+    for ti in range(N_TASKS):
+        for run in range(N_RUNS):
+            row = final_regret[ti, run]
+            best = np.where(row == row.min())[0]
+            for b in best:
+                win_table[ti, b] += 1.0 / len(best)
+    win_rate = win_table / N_RUNS
+    lines.append(f"  {'target':<10} " + "  ".join(f"{n[:18]:>18}"
+                                                  for n in scheme_names))
+    for ti in range(N_TASKS):
+        lines.append(f"  task{ti:02d}     " +
+                     "  ".join(f"{win_rate[ti, si]:>18.3f}"
+                               for si in range(n_schemes)))
+    lines.append(f"  {'mean':<10} " +
+                 "  ".join(f"{win_rate[:, si].mean():>18.3f}"
+                          for si in range(n_schemes)))
+
+    # --- save the analysis to disk --------------------------------------
+    pd.DataFrame(regret_summary,
+                 columns=["scheme", "mean_regret", "ci_lo", "ci_hi"]
+                 ).to_csv(exp_dir / "regret_summary.csv", index=False)
+    pd.DataFrame(infeas_summary,
+                 columns=["scheme", "mean_infeas", "ci_lo", "ci_hi"]
+                 ).to_csv(exp_dir / "infeas_summary.csv", index=False)
+    pd.DataFrame(pair_rows).to_csv(exp_dir / "pairwise_wilcoxon.csv", index=False)
+    pd.DataFrame(win_rate, index=[f"task{i:02d}" for i in range(N_TASKS)],
+                 columns=scheme_names).to_csv(exp_dir / "win_rates.csv")
+
+    return "\n".join(lines)
 
 
 def plot_per_target(ti, bench, runs_by_scheme, f_star, out_path):

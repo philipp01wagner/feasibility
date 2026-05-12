@@ -53,13 +53,19 @@ V_BOUNDS = (10.0, 200.0)   # chamber volume (L), log scale
 QM_BOUNDS = (0.05, 0.5)    # mass inflow (g/s), log scale
 
 # Experiment
-N_PER_SOURCE = 30
-N_TARGET_INIT = 5
-N_BO_ITER = 25
-N_SEEDS = 3
+import os
+N_PER_SOURCE = int(os.environ.get("N_PER_SOURCE", 30))
+N_TARGET_INIT = int(os.environ.get("N_TARGET_INIT", 5))
+N_BO_ITER = int(os.environ.get("N_BO_ITER", 25))
+N_SEEDS = int(os.environ.get("N_SEEDS", 3))
 N_CANDIDATES = 1500
 RGPE_SAMPLES = 30
 SEED = 42
+
+# Task-spread factor: scales the log-(V, qm) LHS box around its geometric
+# centre. 1.0 = full physical range (default); 0.3 = ~30 % of the log-range
+# (tight chamber family, analog of low sigma_mu in the synthetic benchmark).
+TASK_SPREAD = float(os.environ.get("TASK_SPREAD", 1.0))
 
 
 def to_pid_gains(x_log):
@@ -67,12 +73,23 @@ def to_pid_gains(x_log):
 
 
 # ---------------------------- task generation -----------------------------
-def generate_tasks(seed=SEED):
-    """N_TASKS LHS samples in log-(V, qm) space."""
+def generate_tasks(seed=SEED, spread=None):
+    """N_TASKS LHS samples in log-(V, qm) space.
+
+    ``spread`` scales the log-range around the geometric centre:
+    spread=1.0 uses the full physical range; spread=0.5 uses half of it
+    around the centre, etc.  Defaults to the module-level TASK_SPREAD.
+    """
+    if spread is None:
+        spread = TASK_SPREAD
     sampler = LatinHypercube(d=2, seed=seed)
     unit = sampler.random(n=N_TASKS)
-    log_V_lo, log_V_hi = np.log10(V_BOUNDS[0]), np.log10(V_BOUNDS[1])
-    log_q_lo, log_q_hi = np.log10(QM_BOUNDS[0]), np.log10(QM_BOUNDS[1])
+    log_V_c = 0.5 * (np.log10(V_BOUNDS[0]) + np.log10(V_BOUNDS[1]))
+    log_q_c = 0.5 * (np.log10(QM_BOUNDS[0]) + np.log10(QM_BOUNDS[1]))
+    log_V_h = 0.5 * (np.log10(V_BOUNDS[1]) - np.log10(V_BOUNDS[0])) * spread
+    log_q_h = 0.5 * (np.log10(QM_BOUNDS[1]) - np.log10(QM_BOUNDS[0])) * spread
+    log_V_lo, log_V_hi = log_V_c - log_V_h, log_V_c + log_V_h
+    log_q_lo, log_q_hi = log_q_c - log_q_h, log_q_c + log_q_h
     log_V = log_V_lo + unit[:, 0] * (log_V_hi - log_V_lo)
     log_q = log_q_lo + unit[:, 1] * (log_q_hi - log_q_lo)
     return [(float(10 ** v), float(10 ** q)) for v, q in zip(log_V, log_q)]
@@ -117,7 +134,7 @@ def evaluate_pid(kp, ki, kd, V, qm, *, return_stable=False):
     times = np.array(times)
     pressures = np.array(pressures)
     abs_err = np.abs(pressures - TARGET_PRESSURE)
-    itae = float(np.trapz(times * abs_err, times))
+    itae = float(np.trapezoid(times * abs_err, times))
 
     if not return_stable:
         return itae

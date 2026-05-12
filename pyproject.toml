@@ -9,4 +9,8 @@ dependencies = [
     "pandas>=3.0.2",
     "scikit-learn>=1.8.0",
     "scipy>=1.17.1",
+    "plotly>=5.20",
+    "pot>=0.9",
+    "ipykernel>=6.29",
+    "jupyter>=1.0",
 ]

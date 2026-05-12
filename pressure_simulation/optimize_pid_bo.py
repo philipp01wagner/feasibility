@@ -104,7 +104,7 @@ def evaluate_pid(kp: float, ki: float, kd: float) -> tuple[float, dict]:
     abs_err = np.abs(pressures - TARGET_PRESSURE)
 
     # ITAE = integral of t*|e(t)| dt — fast convergence + low residual error
-    itae = float(np.trapz(times * abs_err, times))
+    itae = float(np.trapezoid(times * abs_err, times))
     history = dict(times=times, pressures=pressures, valves=valves, itae=itae)
     return itae, history
 
